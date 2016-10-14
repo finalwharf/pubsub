@@ -1,0 +1,7 @@
+# Disable numeric literals (for port numbers, etc.)
+Style/NumericLiterals:
+    Enabled: false
+
+# Disable documentation
+Documentation:
+  Enabled: false
