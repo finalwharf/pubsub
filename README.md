@@ -7,7 +7,7 @@ This is a simple PubSub implementation in Ruby.
 To run the tests
 
 ```
-$ rspec spec/
+$ rspec --format doc spec/
 ```
 
 ## Usage:

@@ -22,7 +22,7 @@ describe Broker do
   end
 
   it 'binds to the specified address and port' do
-    expect(@broker.bind).to be_truthy
+    expect(@broker.bind).to be true
     expect(@broker.socket).to_not be_nil
     expect(@broker.readable_sockets).to eq [@broker.socket]
   end
@@ -88,6 +88,8 @@ describe Broker do
 
     allow(@broker).to receive(:socket_read).with(client).and_return(data)
 
+    expect(@broker).to receive(:send_recent_messages).with(client, data['topics'])
+
     @broker.handle_subscriber_connection(client)
 
     expect(@broker.topic_subscribers).to eq subscriptions
@@ -119,8 +121,56 @@ describe Broker do
     allow(@broker).to receive(:socket_read).with(publisher).and_return(data)
 
     expect(@broker).to receive(:socket_write).with(client, data)
+    expect(@broker).to receive(:remove_old_messages_for_topic).with('cars')
+    expect(@broker).to receive(:store_message).with(data)
 
     @broker.handle_published_message(publisher)
+  end
+
+  it 'remove messages older then 30 minutes' do
+    messages = {
+      'cars' => [
+        { 'topic' => 'cars', 'message' => 'test 1', 'time' => Time.now.to_i },
+        { 'topic' => 'cars', 'message' => 'test 2', 'time' => Time.now.to_i - 1801 },
+      ]
+    }
+
+    expected_messages = {
+      'cars' => [messages['cars'][0]]
+    }
+
+    @broker.topic_messages = messages
+    @broker.remove_old_messages_for_topic('cars')
+
+    expect(@broker.topic_messages).to eq expected_messages
+  end
+
+  it 'stores messages for later use' do
+    @broker.remove_old_messages_for_topic('cars')
+    data = { 'topic' => 'cars', 'message' => 'test' }
+    @broker.store_message(data)
+
+    expect(@broker.topic_messages).to eq 'cars' => [data]
+    expect(@broker.topic_messages['cars'][0]).to have_key('time')
+  end
+
+  it 'sends recent messages to new subscribers' do
+    client = instance_double('TCPSocket')
+    messages = {
+      'cars' => [
+        { 'topic' => 'cars', 'message' => 'test 1', 'time' => Time.now.to_i }
+      ],
+      'girls' => [
+        { 'topic' => 'girls', 'message' => 'test 2', 'time' => Time.now.to_i - 1801 },
+      ]
+    }
+
+    @broker.topic_messages = messages
+
+    expect(@broker).to receive(:socket_write).with(client, messages['cars'][0])
+    expect(@broker).to_not receive(:socket_write).with(client, messages['girls'][0])
+
+    @broker.send_recent_messages(client, ['cars', 'girls'])
   end
 
   after do

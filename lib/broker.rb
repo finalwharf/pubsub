@@ -10,7 +10,7 @@ module PubSub
   #
   # rubocop:disable ClassLength
   class Broker
-    attr_accessor :publishers, :topic_subscribers
+    attr_accessor :publishers, :topic_subscribers, :topic_messages
     attr_accessor :socket, :readable_sockets
     attr_reader   :logger
 
@@ -21,6 +21,7 @@ module PubSub
       @readable_sockets = []
       @publishers = []
       @topic_subscribers = {}
+      @topic_messages = {}
 
       @logger = Logger.new(self.class.name)
     end
@@ -116,9 +117,29 @@ module PubSub
         return
       end
 
-      data['topics'].each do |topic|
-        topic_subscribers[topic] = [] unless topic_subscribers.key?(topic)
+      topics = data['topics']
+
+      topics.each do |topic|
+        ensure_topic_exists(topic)
         topic_subscribers[topic] << client
+      end
+
+      send_recent_messages(client, topics)
+    end
+
+    def ensure_topic_exists(topic)
+      topic_subscribers[topic] = [] unless topic_subscribers.key?(topic)
+    end
+
+    def send_recent_messages(client, topics)
+      time = Time.now.to_i - 1800
+
+      topics.each do |topic|
+        next unless topic_messages.has_key?(topic)
+
+        topic_messages[topic].each do |message|
+          socket_write(client, message) if message['time'] > time
+        end
       end
     end
 
@@ -127,12 +148,36 @@ module PubSub
     def handle_published_message(publisher)
       data = socket_read(publisher)
 
-      return unless data.is_a?(Hash) && topic_subscribers.key?(data['topic'])
+      return unless data.is_a?(Hash)
 
       topic = data['topic']
 
+      ensure_topic_exists(topic)
+
+      remove_old_messages_for_topic(topic)
+      store_message(data)
+
       topic_subscribers[topic].each do |subscriber|
         socket_write(subscriber, data)
+      end
+    end
+
+    # Store messages so we can send them later to newly connected subscribers
+    def store_message(data)
+      topic = data['topic']
+      topic_messages[topic] = [] unless topic_messages.key?(topic)
+
+      data['time'] = Time.now.to_i
+
+      topic_messages[topic] << data
+    end
+
+    # Remove messages older then 30 minutes
+    def remove_old_messages_for_topic(topic)
+      return unless topic_messages.key?(topic)
+
+      topic_messages[topic].delete_if do |message|
+        message['time'] < Time.now.to_i - 1800 # 1800 seconds are 30 minutes
       end
     end
 
