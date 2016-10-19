@@ -6,28 +6,35 @@ require 'json'
 
 module PubSub
   class Publisher
-    include Logger
-
     attr_accessor :socket
+    attr_reader   :logger
 
     DEFAULT_HOST = '0.0.0.0'.freeze
     DEFAULT_PORT = 12345
 
+    def initialize
+      @logger = Logger.new(self.class.name)
+    end
+
     # Connect to the PubSub broker on given host and port.
     # Returns true or false depending on connection success.
     def connect(host = DEFAULT_HOST, port = DEFAULT_PORT)
-      self.socket = TCPSocket.open(host, port)
+      self.socket = create_socket(host, port)
 
       identify
 
       remote_host = socket.peeraddr[3]
       remote_port = socket.peeraddr[1]
 
-      info "PubSub Publisher connected to #{remote_host}:#{remote_port}."
+      logger.info("Connected to #{remote_host}:#{remote_port}.")
       return true
     rescue Errno::ECONNREFUSED
-      error 'Connection refused! Is the Broker running?'
+      logger.error('Connection refused! Is the Broker running?')
       return false
+    end
+
+    def create_socket(host, port)
+      TCPSocket.new(host, port)
     end
 
     def connected?
@@ -52,7 +59,7 @@ module PubSub
     def socket_write(payload)
       socket.puts(JSON.dump(payload))
     rescue
-      error 'Connection lost! Exitting...'
+      logger.error('Connection lost! Exiting...')
       socket.close
     end
   end

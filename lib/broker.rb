@@ -7,11 +7,12 @@ require 'json'
 module PubSub
   # A simple PubSub broker. It is responsible for receiving
   # messages from publishers and forwarding them to subscribers.
+  #
+  # rubocop:disable ClassLength
   class Broker
-    include Logger
-
     attr_accessor :publishers, :topic_subscribers
     attr_accessor :socket, :readable_sockets
+    attr_reader   :logger
 
     DEFAULT_HOST = '0.0.0.0'.freeze
     DEFAULT_PORT = 12345
@@ -20,19 +21,25 @@ module PubSub
       @readable_sockets = []
       @publishers = []
       @topic_subscribers = {}
+
+      @logger = Logger.new(self.class.name)
     end
 
     # Create the TCP server for the broker.
     # Returns true or false depending on connection success.
     def bind(host = DEFAULT_HOST, port = DEFAULT_PORT)
-      self.socket = TCPServer.open(host, port)
+      self.socket = create_server(host, port)
       @readable_sockets << socket
 
-      info "PubSub Broker started on port #{socket.addr[1]}..."
+      logger.info("PubSub Broker started on port #{socket.addr[1]}...")
       return true
     rescue Errno::EADDRINUSE
-      error 'Specified address and port are already in use.'
+      logger.error('Specified address and port are already in use.')
       return false
+    end
+
+    def create_server(host, port)
+      TCPServer.new(host, port)
     end
 
     def start
@@ -65,12 +72,12 @@ module PubSub
       return []
     end
 
-    # Handle incomming connections
+    # Handle incoming connections
     def handle_client_connection
       client = socket.accept
 
       client_type = determine_client_type(client)
-      info "Client connected. Client type is #{client_type}"
+      logger.info("Client connected. Client type is #{client_type}")
 
       if client_type == 'publisher'
         handle_publisher_connection(client)
@@ -80,16 +87,20 @@ module PubSub
     end
 
     def determine_client_type(client)
-      # Prevent clients from blocking the brocker with idle connections
+      # Prevent clients from blocking the broker with idle connections
       # Close the socket if the client doesn't identify within a second
-      unless IO.select([client], nil, nil, 1)
-        info 'Client is not identifying. Closing connection.'
+      unless client_ready_for_read?(client)
+        logger.info('Client is not identifying. Closing connection.')
         client.close
         return nil
       end
 
       data = socket_read(client)
       data.is_a?(Hash) ? data['client_type'] : nil
+    end
+
+    def client_ready_for_read?(client)
+      IO.select([client], nil, nil, 1)
     end
 
     def handle_publisher_connection(client)
@@ -119,10 +130,9 @@ module PubSub
       return unless data.is_a?(Hash) && topic_subscribers.key?(data['topic'])
 
       topic = data['topic']
-      message = data['message']
 
       topic_subscribers[topic].each do |subscriber|
-        socket_write(subscriber, topic: topic, message: message)
+        socket_write(subscriber, data)
       end
     end
 
@@ -130,17 +140,17 @@ module PubSub
       data = socket.gets
       JSON.parse(data.strip) if data
     rescue JSON::ParserError
-      error 'Invalid message format.'
+      logger.error('Invalid message format.')
     end
 
     def socket_write(socket, payload)
       socket.puts(JSON.dump(payload))
     rescue
-      error 'Connection lost! Disconnecting client...'
+      logger.error('Connection lost! Disconnecting client...')
 
       topic_subscribers.each do |_topic, subscribers|
-        subscribers.delete(client)
-        client.close
+        subscribers.delete(socket)
+        socket.close
       end
     end
   end

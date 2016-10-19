@@ -3,6 +3,13 @@
 This is a simple PubSub implementation in Ruby.
 
 
+## Tests
+To run the tests
+
+```
+$ rspec spec/
+```
+
 ## Usage:
 
 Go go the `demo` folder

@@ -6,28 +6,35 @@ require 'json'
 
 module PubSub
   class Subscriber
-    include Logger
-
     attr_accessor :socket
+    attr_reader   :logger
 
     DEFAULT_HOST = '0.0.0.0'.freeze
     DEFAULT_PORT = 12345
 
+    def initialize
+      @logger = Logger.new(self.class.name)
+    end
+
     # Connect to the PubSub broker on given host and port.
     # Returns true or false depending on connection success.
     def connect(host = DEFAULT_HOST, port = DEFAULT_PORT)
-      self.socket = TCPSocket.open(host, port)
+      self.socket = create_socket(host, port)
 
       identify
 
       remote_host = socket.peeraddr[3]
       remote_port = socket.peeraddr[1]
 
-      info "PubSub Subscriber connected to #{remote_host}:#{remote_port}."
+      logger.info("Connected to #{remote_host}:#{remote_port}.")
       return true
     rescue Errno::ECONNREFUSED
-      error 'Connection refused! Is the Broker running?'
+      logger.error('Connection refused! Is the Broker running?')
       return false
+    end
+
+    def create_socket(host, port)
+      TCPSocket.new(host, port)
     end
 
     def connected?
@@ -41,8 +48,8 @@ module PubSub
     def receive_message
       data = socket_read_blocking
       JSON.parse(data.strip) if data
-    rescue JSON::ParserError
-      error 'Invalid message format.'
+    rescue JSON::Parserlogger.error
+      logger.error('Invalid message format.')
     end
 
     # Tell the broker we are a subscriber
@@ -63,7 +70,7 @@ module PubSub
     def socket_write(data)
       socket.puts(JSON.dump(data))
     rescue
-      error 'Connection lost! Exitting...'
+      logger.error('Connection lost! Exiting...')
       disconnect
     end
   end
